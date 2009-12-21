@@ -1,0 +1,215 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use utf8;
+use open OUT => ':encoding(euc-jp)', ":std";
+use Carp;
+use IO::File;
+STDOUT->autoflush(1);
+use Getopt::Long;
+use Pod::Usage;
+
+use Encode;
+use Encode::Guess;
+use Jcode;
+
+BEGIN {
+    my $debug_flag = $ENV{SMART_COMMENTS} || $ENV{SMART_DEBUG} || $ENV{SC};
+    if ($debug_flag) {
+        my @p = map { '#'x$_ } ($debug_flag =~ /([345])\s*/g);
+        use UNIVERSAL::require;
+        Smart::Comments->use(@p);
+    }
+}
+
+my $Debug = 0;
+
+sub dprint (@) {
+    return unless $Debug;
+    chomp(my @m = @_);
+    print STDERR 'DEBUG: ', join(" ", @m),"\n";
+}
+
+sub dprint2(@) {
+    dprint @_ if $Debug >= 2;
+}
+
+my @Primary_Charenc = qw(utf-8 euc-jp sjis jis ascii);
+my %Normalized_Charenc_of = (
+    euc        => "euc-jp",
+    utf8       => "utf-8",
+    "7bit-jis" => "jis",
+    shiftjis   => "sjis",
+   );
+
+MAIN: {
+    my %opt;
+    my $assume_enc;
+    my $display_enc;
+    Getopt::Long::Configure("bundling");
+    GetOptions(\%opt,
+               'k=s' => \$assume_enc,
+#               'o=s' => \$display_enc,
+               'verbose|v',
+               'debug|d+' => \$Debug,
+               'help|h|?' => sub{ pod2usage(-verbose=>1) }) or pod2usage();
+    dprint "DEBUG MODE LEVEL=$Debug";
+
+    $assume_enc = normalize_charencname($assume_enc);
+    print "assume_enc: $assume_enc\n" if $assume_enc;
+#    $display_enc ||= "euc-jp";
+
+    for my $infile (@ARGV ? @ARGV : "/dev/stdin") {
+        ### infile: $infile
+        my($stat_enc, $stat_le);
+        $stat_enc = +{ map { $_=>0 } @Primary_Charenc };
+
+        my $fh = IO::File->new($infile, "r") or croak $!;
+        while (defined (my $line = $fh->getline)) {
+            my $guessed = guess_it($line);
+            $stat_enc->{$guessed->{enc}}++;
+            $stat_le->{$guessed->{lineend}}++;
+
+            chomp $line;
+            if ($opt{verbose}
+                || ($assume_enc && $guessed->{enc} ne "ascii" && $assume_enc ne $guessed->{enc})) {
+                printf("%2d: [%s%s] %s\n",
+                       $.,
+                       $guessed->{enc},
+                       $guessed->{enc_warn} ? " (may $guessed->{enc_warn} ?)" : "",
+                       decode($guessed->{enc}, $line),
+                      );
+            }
+        }
+        $fh->close;
+
+        ### enc: $stat_enc
+        ### nl : $stat_le
+        printf "%-15s ", $infile;
+        # printf "utf-8: %2d, euc-jp: %2d, sjis: %2d, jis: %2d, ascii: %2d, ",
+        #     delete @{$stat_enc}{@Primary_Charenc},
+        #     ;
+        for my $enc (@Primary_Charenc) {
+            next if (my $v = delete $stat_enc->{$enc}) <= 0;
+            printf "%s: %2d, ", $enc, $v;
+        }
+        while (my($k,$v) = each %$stat_enc) {
+            printf "%s: %2d, ", $k, $v;
+        }
+        print "| ";
+        while (my($k,$v) = each %$stat_le) {
+            printf "%s: %2d, ", $k, $v;
+        }
+        print "\n";
+    }
+
+    exit 0;
+}
+
+sub guess_it {
+    my $str = shift;
+    return {
+        %{ guess_charenc($str) },
+        lineend => guess_lineend($str),
+       };
+}
+
+sub guess_charenc {
+    my $str = shift;
+    my $enc = guess_encoding($str, qw(euc-jp shift_jis 7bit-jis));
+
+    return ref $enc
+        ? { enc      => normalize_charencname( $enc->name ),
+            enc_warn => "" }
+        : { enc      => normalize_charencname( (Jcode::getcode($str)||())[0] ),
+            enc_warn => $enc }
+        ;
+}
+
+sub guess_lineend {
+    my $str = shift;
+    foreach ($str) {
+        /\015\012$/ and do { return 'crlf';    };
+        /\012$/     and do { return 'lf';      };
+        /\015$/     and do { return 'cr';      };
+        /.*/        and do { return 'unknown'; };
+    }
+}
+
+sub normalize_charencname {
+    my $enc = shift||"";
+    return exists $Normalized_Charenc_of{$enc} ? $Normalized_Charenc_of{$enc} : $enc;
+}
+
+__END__
+
+=encoding utf-8
+
+=head1 NAME
+
+B<check-mixed-charenc> - detect character encoding per line
+
+=head1 SYNOPSIS
+
+B<check-mixed-charenc> [ B<-d> ] [ B<-k> I<charenc> [B<-o> I<charenc>] ] I<file>
+
+  $ ./check-mixed-charenc gojyagojya.txt
+  utf-8:  3, euc-jp:  3, sjis:  3, jis:  3, ascii:  3, | lf: 15,
+
+  $ ./check-mixed-charenc -k euc-jp gojyagojya.txt
+  assume_enc: euc-jp
+  1: jis  jis いち
+  2: jis  jis にっ
+  3: jis  jis さん！
+  4: sjis  sjis いち
+  5: sjis  sjis にっ
+  6: sjis  sjis さん！
+  13: utf-8  utf-8 いち
+  14: utf-8 (may shiftjis or utf8 ?) utf-8 にっ
+  15: utf-8  utf-8 さん！
+  utf-8:  3, euc-jp:  3, sjis:  3, jis:  3, ascii:  3, | lf: 15,
+
+=head1 DESCRIPTION
+
+this program is ...
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-k> I<charenc>
+
+  charenc: Str
+
+指定された文字コードと一致しない行の、行番号と行データを表示する。
+
+=item B<-d>
+
+increase debug level.
+-d -d more verbosely.
+
+=back
+
+=head1 AUTHOR
+
+HIROSE, Masaaki E<lt>hirose31 _at_ gmail.comE<gt>
+
+=head1 COPYRIGHT & LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+
+=head1 HISTORY
+
+=cut
+
+# for Emacsen
+# Local Variables:
+# mode: cperl
+# cperl-indent-level: 4
+# indent-tabs-mode: nil
+# coding: utf-8
+# End:
+
+# vi: set ts=4 sw=4 sts=0 :

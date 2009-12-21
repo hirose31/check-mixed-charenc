@@ -1,0 +1,61 @@
+=encoding utf-8
+
+=head1 NAME
+
+B<check-mixed-charenc> - detect character encoding per line
+
+=head1 SYNOPSIS
+
+B<check-mixed-charenc> [ B<-d> ] [ B<-k> I<charenc> [B<-o> I<charenc>] ] I<file>
+
+  $ ./check-mixed-charenc gojyagojya.txt
+  utf-8:  3, euc-jp:  3, sjis:  3, jis:  3, ascii:  3, | lf: 15,
+
+  $ ./check-mixed-charenc -k euc-jp gojyagojya.txt
+  assume_enc: euc-jp
+  1: jis  jis いち
+  2: jis  jis にっ
+  3: jis  jis さん！
+  4: sjis  sjis いち
+  5: sjis  sjis にっ
+  6: sjis  sjis さん！
+  13: utf-8  utf-8 いち
+  14: utf-8 (may shiftjis or utf8 ?) utf-8 にっ
+  15: utf-8  utf-8 さん！
+  utf-8:  3, euc-jp:  3, sjis:  3, jis:  3, ascii:  3, | lf: 15,
+
+=head1 DESCRIPTION
+
+this program is ...
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-k> I<charenc>
+
+  charenc: Str
+
+指定された文字コードと一致しない行の、行番号と行データを表示する。
+
+=item B<-d>
+
+increase debug level.
+-d -d more verbosely.
+
+=back
+
+=head1 AUTHOR
+
+HIROSE, Masaaki E<lt>hirose31 _at_ gmail.comE<gt>
+
+=head1 COPYRIGHT & LICENSE
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+
+=head1 HISTORY
+
+
+=cut
+
